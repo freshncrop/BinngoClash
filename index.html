@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Tracker - Enhanced Background Mode</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            font-weight: bold;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #cce6ff; color: #004085; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        .location-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            display: none;
+        }
+        .test-btn {
+            background-color: #28a745;
+            font-size: 14px;
+            padding: 10px 20px;
+        }
+        .test-btn:hover {
+            background-color: #218838;
+        }
+        .background-status {
+            background: #e7f3ff;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 12px;
+            border-left: 4px solid #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌍 Enhanced Location Tracker</h1>
+        <p>Advanced background tracking with Service Worker</p>
+
+        <div id="status" class="status info">
+            Click "Test API" first, then "Start Enhanced Tracking"
+        </div>
+
+        <div id="background-status" class="background-status" style="display: none;">
+            <p><strong>🔧 Background Status:</strong> <span id="bg-text">Initializing...</span></p>
+        </div>
+
+        <div id="location-info" class="location-info">
+            <h3>📍 Current Location</h3>
+            <p><strong>Latitude:</strong> <span id="latitude">-</span></p>
+            <p><strong>Longitude:</strong> <span id="longitude">-</span></p>
+            <p><strong>Last Updated:</strong> <span id="last-updated">-</span></p>
+            <p><strong>API Calls Made:</strong> <span id="api-calls">0</span></p>
+            <p><strong>Background Syncs:</strong> <span id="bg-syncs">0</span></p>
+        </div>
+
+        <button class="test-btn" onclick="testAPI()">🧪 Test API Connection</button><br>
+        <button id="startBtn" onclick="startEnhancedTracking()">🚀 Start Enhanced Tracking</button>
+        <button id="stopBtn" onclick="stopTracking()" disabled>⏹️ Stop Tracking</button>
+
+        <div style="margin-top: 30px; font-size: 12px; color: #666; text-align: left;">
+            <p><strong>🔋 Enhanced Background Features:</strong></p>
+            <ul style="text-align: left;">
+                <li><strong>Aggressive Intervals:</strong> 30-second checks when hidden</li>
+                <li><strong>Service Worker Sync:</strong> Background API calls</li>
+                <li><strong>Auto Recovery:</strong> Resumes on page focus</li>
+                <li><strong>Wake Lock:</strong> Keeps device awake (if supported)</li>
+                <li><strong>Persistence:</strong> Survives page refreshes</li>
+            </ul>
+
+            <div class="warning" style="margin-top: 15px; padding: 10px; border-radius: 5px;">
+                <p><strong>⚠️ Browser Limitation:</strong> Cannot run when browser is completely closed (security restriction)</p>
+                <p><strong>✅ Best Practice:</strong> Keep browser minimized, not closed</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_CONFIG = {
+            url: 'https://nhfyodexozunbdepgdlz.supabase.co/rest/v1/location',
+            headers: {
+                'apikey': 'sb_publishable_rYYf2tEHhpCtENhAUWizuQ_mS2yadt2',
+                'Authorization': 'Bearer sb_publishable_rYYf2tEHhpCtENhAUWizuQ_mS2yadt2',
+                'Content-Type': 'application/json'
+            }
+        };
+
+        let trackingInterval = null;
+        let backgroundInterval = null;
+        let isTracking = false;
+        let apiCallCount = parseInt(localStorage.getItem('apiCallCount') || '0');
+        let bgSyncCount = parseInt(localStorage.getItem('bgSyncCount') || '0');
+        let apiTested = localStorage.getItem('apiTested') === 'true';
+        let serviceWorkerReady = false;
+        let wakeLock = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('api-calls').textContent = apiCallCount;
+            document.getElementById('bg-syncs').textContent = bgSyncCount;
+
+            // Register enhanced service worker
+            registerEnhancedServiceWorker();
+
+            // Auto-resume tracking if it was active
+            if (localStorage.getItem('isTracking') === 'true') {
+                if (apiTested) {
+                    setTimeout(() => startEnhancedTracking(), 1000);
+                } else {
+                    updateStatus('Test API connection before resuming tracking', 'info');
+                }
+            }
+        });
+
+        async function registerEnhancedServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.register('./service-worker.js');
+                    serviceWorkerReady = true;
+                    updateBackgroundStatus('Service Worker registered - enhanced background mode enabled');
+
+                    // Listen for messages from service worker
+                    navigator.serviceWorker.addEventListener('message', function(event) {
+                        if (event.data && event.data.type === 'SYNC_SUCCESS') {
+                            bgSyncCount++;
+                            localStorage.setItem('bgSyncCount', bgSyncCount.toString());
+                            document.getElementById('bg-syncs').textContent = bgSyncCount;
+                            console.log('Background sync successful');
+                        }
+                    });
+
+                } catch (error) {
+                    console.log('Service Worker registration failed:', error);
+                    updateBackgroundStatus('Service Worker failed - using fallback mode');
+                }
+            } else {
+                updateBackgroundStatus('Service Worker not supported - using basic mode');
+            }
+
+            document.getElementById('background-status').style.display = 'block';
+        }
+
+        async function testAPI() {
+            updateStatus('🔍 Testing API connection...', 'info');
+
+            const testData = {
+                lat: "40.7128",
+                long: "-74.0060",
+                created_at: new Date().toLocaleString("sv-SE", {timeZone: "Asia/Kolkata"})
+            };
+
+            try {
+                const response = await fetch(API_CONFIG.url, {
+                    method: 'POST',
+                    headers: API_CONFIG.headers,
+                    body: JSON.stringify(testData)
+                });
+
+                if (response.ok) {
+                    apiTested = true;
+                    localStorage.setItem('apiTested', 'true');
+                    updateStatus('✅ API connection successful! Ready for enhanced tracking.', 'success');
+                } else {
+                    const errorText = await response.text();
+                    updateStatus(`❌ API Error ${response.status}: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`❌ Connection failed: ${error.message}`, 'error');
+                console.error('API Test Error:', error);
+            }
+        }
+
+        async function startEnhancedTracking() {
+            if (isTracking) return;
+
+            if (!apiTested) {
+                updateStatus('Please test API connection first', 'error');
+                return;
+            }
+
+            if (!navigator.geolocation) {
+                updateStatus('Geolocation not supported by this browser', 'error');
+                return;
+            }
+
+            // Request wake lock to keep device active
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    updateBackgroundStatus('Wake lock active - device will stay awake');
+                }
+            } catch (error) {
+                console.log('Wake lock failed:', error);
+            }
+
+            updateStatus('📍 Starting enhanced location tracking...', 'info');
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    isTracking = true;
+                    localStorage.setItem('isTracking', 'true');
+
+                    updateStatus('🟢 Enhanced tracking active - maximum background performance', 'success');
+                    updateButtons();
+                    showLocationInfo();
+
+                    // Send first location
+                    sendLocationToAPI(position.coords);
+
+                    // Start service worker background tracking
+                    if (serviceWorkerReady && navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({
+                            type: 'START_TRACKING'
+                        });
+                    }
+
+                    // Primary interval - 5 minutes when page is visible
+                    trackingInterval = setInterval(() => {
+                        if (!document.hidden) {
+                            getCurrentLocationAndSend();
+                        }
+                    }, 5 * 60 * 1000); // 5 minutes
+
+                    // Background interval - 30 seconds when page is hidden
+                    backgroundInterval = setInterval(() => {
+                        if (document.hidden) {
+                            getCurrentLocationAndSend();
+                        }
+                    }, 30 * 1000); // 30 seconds for aggressive background tracking
+
+                    updateBackgroundStatus('Enhanced tracking active - using all available background techniques');
+                },
+                function(error) {
+                    let message = '';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            message = 'Location access denied. Please allow location permission.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            message = 'Location information unavailable.';
+                            break;
+                        case error.TIMEOUT:
+                            message = 'Location request timed out.';
+                            break;
+                        default:
+                            message = 'Unknown location error occurred.';
+                            break;
+                    }
+                    updateStatus(message, 'error');
+                }
+            );
+        }
+
+        function stopTracking() {
+            isTracking = false;
+            localStorage.setItem('isTracking', 'false');
+
+            // Clear intervals
+            if (trackingInterval) {
+                clearInterval(trackingInterval);
+                trackingInterval = null;
+            }
+            if (backgroundInterval) {
+                clearInterval(backgroundInterval);
+                backgroundInterval = null;
+            }
+
+            // Stop service worker tracking
+            if (serviceWorkerReady && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'STOP_TRACKING'
+                });
+            }
+
+            // Release wake lock
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+
+            updateStatus('⏹️ Enhanced tracking stopped', 'info');
+            updateBackgroundStatus('Tracking stopped - all background processes terminated');
+            updateButtons();
+        }
+
+        function getCurrentLocationAndSend() {
+            navigator.geolocation.getCurrentPosition(
+                (position) => sendLocationToAPI(position.coords),
+                (error) => console.log('Location error:', error.message),
+                { timeout: 10000, maximumAge: 30000 } // Faster timeout for background requests
+            );
+        }
+
+        async function sendLocationToAPI(coords) {
+            const locationData = {
+                lat: coords.latitude.toString(),
+                long: coords.longitude.toString(),
+                created_at: new Date().toLocaleString("sv-SE", {timeZone: "Asia/Kolkata"})
+            };
+
+            try {
+                console.log('📤 Sending location:', locationData);
+
+                // Store location in service worker for background sync
+                if (serviceWorkerReady && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({
+                        type: 'LOCATION_UPDATE',
+                        location: locationData
+                    });
+                }
+
+                const response = await fetch(API_CONFIG.url, {
+                    method: 'POST',
+                    headers: API_CONFIG.headers,
+                    body: JSON.stringify(locationData)
+                });
+
+                if (response.ok) {
+                    apiCallCount++;
+                    localStorage.setItem('apiCallCount', apiCallCount.toString());
+                    updateLocationDisplay(coords.latitude, coords.longitude);
+                    document.getElementById('api-calls').textContent = apiCallCount;
+
+                    const mode = document.hidden ? 'Background' : 'Foreground';
+                    console.log(`✅ ${mode} location sent successfully`);
+                } else {
+                    const errorText = await response.text();
+                    console.error('❌ API Error:', response.status, errorText);
+                }
+            } catch (error) {
+                console.error('❌ Send Error:', error);
+            }
+        }
+
+        function updateLocationDisplay(lat, lng) {
+            document.getElementById('latitude').textContent = lat.toFixed(6);
+            document.getElementById('longitude').textContent = lng.toFixed(6);
+            document.getElementById('last-updated').textContent = new Date().toLocaleString();
+        }
+
+        function updateStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function updateBackgroundStatus(message) {
+            document.getElementById('bg-text').textContent = message;
+        }
+
+        function updateButtons() {
+            document.getElementById('startBtn').disabled = isTracking;
+            document.getElementById('stopBtn').disabled = !isTracking;
+        }
+
+        function showLocationInfo() {
+            document.getElementById('location-info').style.display = 'block';
+        }
+
+        // Enhanced page visibility handling
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                updateBackgroundStatus('Page hidden - aggressive background tracking active (30s intervals)');
+                console.log('🌙 Page hidden - entering background mode');
+            } else {
+                updateBackgroundStatus('Page visible - normal tracking active (5min intervals)');
+                console.log('🌞 Page visible - entering foreground mode');
+
+                // Immediately check location when page becomes visible
+                if (isTracking) {
+                    setTimeout(() => getCurrentLocationAndSend(), 1000);
+                }
+            }
+        });
+
+        // Handle page unload - try to keep tracking active
+        window.addEventListener('beforeunload', function(event) {
+            if (isTracking) {
+                console.log('⚠️ Page unloading - background tracking will attempt to continue via Service Worker');
+            }
+        });
+
+        // Periodic health check - restart intervals if they stop
+        setInterval(() => {
+            if (isTracking) {
+                if (!trackingInterval && !document.hidden) {
+                    console.log('🔄 Restarting foreground interval');
+                    trackingInterval = setInterval(() => {
+                        if (!document.hidden) {
+                            getCurrentLocationAndSend();
+                        }
+                    }, 5 * 60 * 1000);
+                }
+
+                if (!backgroundInterval) {
+                    console.log('🔄 Restarting background interval');
+                    backgroundInterval = setInterval(() => {
+                        if (document.hidden) {
+                            getCurrentLocationAndSend();
+                        }
+                    }, 30 * 1000);
+                }
+            }
+        }, 30000); // Check every 30 seconds
+    </script>
+</body>
+</html>
